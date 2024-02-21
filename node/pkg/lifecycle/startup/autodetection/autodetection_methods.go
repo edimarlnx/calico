@@ -33,6 +33,7 @@ const (
 	AUTODETECTION_METHOD_SKIP_INTERFACE = "skip-interface="
 	AUTODETECTION_METHOD_CIDR           = "cidr="
 	K8S_INTERNAL_IP                     = "kubernetes-internal-ip"
+	K8S_EXTERNAL_IP                     = "kubernetes-external-ip"
 )
 
 // autoDetectCIDR auto-detects the IP and Network using the requested
@@ -81,6 +82,13 @@ func AutoDetectCIDR(method string, version int, k8sNode *v1.Node, getInterfaces 
 			return nil
 		}
 		return autoDetectUsingK8sInternalIP(version, k8sNode, getInterfaces)
+	} else if strings.HasPrefix(method, K8S_EXTERNAL_IP) {
+		// K8s ExternalIP configured for node is used
+		if k8sNode == nil {
+			log.Error("Cannot use method 'kubernetes-external-ip' when not running on a Kubernetes cluster")
+			return nil
+		}
+		return autoDetectUsingK8sExternalIP(version, k8sNode, getInterfaces)
 	}
 
 	// The autodetection method is not recognised and is required.  Exit.
@@ -164,12 +172,21 @@ func autoDetectCIDRBySkipInterface(ifaceRegexes []string, version int) *cnet.IPN
 
 // autoDetectUsingK8sInternalIP reads K8s Node InternalIP.
 func autoDetectUsingK8sInternalIP(version int, k8sNode *v1.Node, getInterfaces func([]string, []string, int) ([]Interface, error)) *cnet.IPNet {
+	return autoDetectUsingK8sIP(v1.NodeInternalIP, version, k8sNode, getInterfaces)
+}
+
+// autoDetectUsingK8sExternalIP reads K8s Node NodeExternalIP.
+func autoDetectUsingK8sExternalIP(version int, k8sNode *v1.Node, getInterfaces func([]string, []string, int) ([]Interface, error)) *cnet.IPNet {
+	return autoDetectUsingK8sIP(v1.NodeExternalIP, version, k8sNode, getInterfaces)
+}
+
+func autoDetectUsingK8sIP(nodeAddressType v1.NodeAddressType, version int, k8sNode *v1.Node, getInterfaces func([]string, []string, int) ([]Interface, error)) *cnet.IPNet {
 	var address string
 	var err error
 
 	nodeAddresses := k8sNode.Status.Addresses
 	for _, addr := range nodeAddresses {
-		if addr.Type == v1.NodeInternalIP {
+		if addr.Type == nodeAddressType {
 			if (version == 4 && utils.IsIPv4String(addr.Address)) || (version == 6 && utils.IsIPv6String(addr.Address)) {
 				address, err = GetLocalCIDR(addr.Address, version, getInterfaces)
 				if err != nil {
